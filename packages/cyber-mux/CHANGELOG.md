@@ -1,5 +1,98 @@
 # cyber-mux
 
+## 0.5.0
+
+### Minor Changes
+
+- 3fd1c3c: Add cmux backend adapter
+
+  cmux is a Ghostty-based macOS terminal built for AI coding agents. This adds detection (`$CMUX_WORKSPACE_ID`) and a full `MuxAdapter` implementation using cmux's CLI (`cmux new-pane`, `cmux send`, etc.).
+
+  - Detection via `$CMUX_WORKSPACE_ID` env variable
+  - Pane identity via `$CMUX_SURFACE_ID` (cmux's "surface" is the terminal unit)
+  - Supports workspace, tab (surface), and pane:right/pane:down placements
+  - Supports split sizing via `--size` flag
+  - No `--env` flag support (env compensation via command prefix)
+  - No geometry/regions support (cmux CLI doesn't report positions)
+  - macOS-only (cmux is a native Swift/AppKit app)
+
+- 2c7de82: Add a `pane:float` placement — a pane that sits above the tiled layout instead of taking a share of
+  it, so nothing else is resized.
+
+  - `MuxPlacement` gains `'pane:float'`, and `--at pane:float` gains the matching CLI choice. A
+    floating pane is an ordinary `OpenedPane` with a real id, so `read`/`sendText`/`submit`/
+    `waitForOutput`/`teardown` drive it unchanged.
+  - **tmux** (≥ 3.7, `new-pane`) and **zellij** (`new-pane --floating`) open a real one.
+  - **wezterm** and **herdr** have no floating-pane concept and **refuse by name** — a new
+    `FloatingPanesUnsupportedError` from `open`, surfaced by the CLI as `backend-unsupported` (exit 1)
+    — rather than quietly substituting a tiled split, which would resize the region's other panes.
+    `MuxAdapter.canFloatPanes` (with the `canFloatPanes(adapter)` helper) is how a caller asks before
+    opening; the refusal is raised before any backend command, so a refused float opens nothing.
+  - `ratio` is dropped on a float on every backend, tmux included: a float takes no share of the
+    region, so there is no original pane whose fraction it could be.
+
+- fd13d41: Add otty backend adapter
+
+  otty is a native terminal-centric workspace app with integrated multiplexing, built for AI coding agents. This adds detection and a full `MuxAdapter` implementation using otty's CLI.
+
+  - Detection via `$OTTY_PANE_ID` env variable
+  - Supports workspace (window), tab, and pane:right/pane:down placements
+  - Send-keys supports text and key tokens in one atomic call
+  - No split sizing support (`canSizeSplits: false`)
+  - No `--env` flag support (env compensation via command prefix)
+  - No geometry/regions support (otty CLI doesn't report positions)
+  - macOS/Windows desktop app
+
+- 1535fab: `read` reports whether the capture dropped older rows, and `--full` takes the rest
+
+  `MuxAdapter.read` (and the bound `MuxSession.read`) now answers with `{ text, truncated? }` instead
+  of a bare string, so a caller matching against a snapshot can tell a short pane from a capture that
+  hit its bound. Pass `MuxReadOptions.truncation` to have the backend determine it; leave it off and
+  `truncated` is **absent** — never `false`, because a `false` that means "I did not check" is
+  indistinguishable from "you have everything" (the conflation herdr itself shipped a fix for in 0.8.0,
+  herdrdev/herdr#1717).
+
+  `MuxReadOptions.lines` gains `'all'` — the same window knob at its limit, for the whole scrollback.
+  One option rather than a second `full?: boolean`, so no caller can spell a contradiction the seam
+  would need a precedence rule for. It also makes the truncation answer free at that end: an unbounded
+  window omitted nothing by construction, so no adapter spends a probe on it.
+
+  Real on every backend, by one rule: ask for one row more than the captured window and compare row
+  counts (`isReadTruncated`, `read-window.ts`). tmux takes `-S -(N+1)` and spells `'all'` as `-S -`,
+  WezTerm `--start-line -(N+1)`, Zellij compares against the full dump its `lines` read already holds
+  (no extra query) and takes `--full` for `'all'`, and herdr probes `--source recent` — its CLI prints
+  the read's text alone and never surfaces the `truncated` its socket API computes.
+
+  Opt-in at the seam because the probe costs one extra backend query and `read` is the hottest verb
+  there — `pollForOutput` runs it once per poll tick. Omitted, the argv is byte-identical to the read
+  that has always been issued.
+
+  CLI: `cyber-mux read` now carries one read window and one escape hatch — `--lines <n>` bounds it,
+  `--full` takes the whole scrollback, and passing both is a usage error (exit 2). It **always** reports
+  truncation, no flag needed: a truncated capture is followed by a `truncated` field and a `help:` entry
+  naming `--full` as the fix (AXI #3's shape), while a complete capture stays the pane's raw bytes alone
+  so `read | grep` is unchanged. `--format json` spells `truncated` either way. The answer is never on
+  stderr, which agents do not read.
+
+  Callers reading text from `read` now take `.text` (`nudge` and `waitForOutput` already do
+  internally).
+
+### Patch Changes
+
+- 303a0e9: Fix two zellij `list-panes --json` field names, verified against a live 0.44.3 binary
+
+  The zellij adapter was built from a documentation probe, and two of the field names it read do not
+  exist in zellij's actual output. Driving the adapter against a real binary surfaced both.
+
+  - `pane_command` is really `terminal_command`. The adapter drops a pane's title when that title is
+    just the running command zellij gave an unnamed pane — a guard that stops every shell pane from
+    reporting the same manufactured `label`. Reading the wrong name meant the guard compared against
+    `undefined` and never fired, so unnamed panes exported their own command line as an authored
+    label. It now fires.
+  - `pane_cwd` does not exist; zellij's pane records carry no cwd field at all. `LivePane.cwd` was
+    therefore never populated for zellij and the code that read it was dead. It is gone, so a zellij
+    pane is honestly cwd-less rather than appearing to sometimes report one.
+
 ## 0.4.0
 
 ### Minor Changes
