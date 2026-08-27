@@ -107,6 +107,10 @@ pnpm verify   # turbo: build + typecheck + lint + test + biome ci
   `CLAUDE.md`, or `.codex/`, run `git diff --check` instead. Do not run `pnpm verify`; these files do
   not affect the build or test suite.
 
+## Raising PRs
+
+PRs in this repo are routed through `pr-axi`: `pr-axi raise` opens a same-repo PR (onyx-space/cyber-mux), `pr-axi raise --upstream` opens a PR to the parent (cyberuni/cyber-mux) via a transient fork switch. See `~/.agents/skills/pr-axi/SKILL.md`.
+
 ## Language
 
 Write all content in en-US (American English spelling).
